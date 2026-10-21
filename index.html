@@ -73,6 +73,21 @@
     </section>
 
     <section class="bot">
+      <h2>Copy Trade</h2>
+      <p>Watch a wallet. When it buys or sells a token, mirror with your USDC size (prompts your wallet). Live only.</p>
+      <label>Wallet to copy
+        <input id="copyWallet" value="5m1GCXJqvYv9wC5qf8njetG39pBwCSTb11XwY3sQkW7a">
+      </label>
+      <label>Copy size (USDC) <input id="copySize" type="number" value="10" step="1"></label>
+      <label><input type="checkbox" id="copyAuto"> Auto-mirror new trades</label>
+      <div class="btn-row">
+        <button id="startCopy">Start Copy</button>
+        <button id="stopCopy">Stop</button>
+      </div>
+      <div id="copyLog"></div>
+    </section>
+
+    <section class="bot">
       <h2>Withdraw SOL</h2>
       <p>Simple SOL transfer from your connected wallet.</p>
       <label>To address <input id="withdrawTo" placeholder="Solana address"></label>

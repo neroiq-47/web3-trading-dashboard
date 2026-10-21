@@ -2,12 +2,16 @@ const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = 
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 let provider, publicKey, connection, walletLabel = '', fullAddress = '';
 let botInterval, lastTradeAt = 0;
 let chart, lineSeries;
 let tokenBalanceRaw = 0n;
 let tokenDecimals = 0;
+
+let copyInterval, seenSigs = new Set();
 
 const connectPhantomBtn = document.getElementById('connectPhantom');
 const connectJupiterBtn = document.getElementById('connectJupiter');
@@ -24,6 +28,9 @@ const withdrawBtn = document.getElementById('withdrawBtn');
 const copyAddrBtn = document.getElementById('copyAddr');
 const refreshTokenBtn = document.getElementById('refreshToken');
 const tokenMintInput = document.getElementById('tokenMint');
+const startCopyBtn = document.getElementById('startCopy');
+const stopCopyBtn = document.getElementById('stopCopy');
+const copyLogEl = document.getElementById('copyLog');
 
 if ('Notification' in window && Notification.permission !== 'granted') {
   Notification.requestPermission();
@@ -44,11 +51,11 @@ function ensureConnection() {
   return connection;
 }
 
-function log(msg) {
+function log(msg, el = logEl) {
   const entry = document.createElement('div');
   entry.className = 'log-entry';
   entry.textContent = new Date().toLocaleTimeString() + ': ' + msg;
-  logEl.prepend(entry);
+  el.prepend(entry);
 }
 function notify(title, body) {
   if (document.getElementById('notify')?.checked && Notification.permission === 'granted') {
@@ -329,6 +336,97 @@ startBtn.onclick = () => {
 stopBtn.onclick = () => {
   if (botInterval) clearInterval(botInterval);
   log('Stopped');
+};
+
+// --- Copy trade ---
+function parseTokenChanges(tx, owner) {
+  const changes = [];
+  const meta = tx?.meta;
+  if (!meta) return changes;
+  const pre = meta.preTokenBalances || [];
+  const post = meta.postTokenBalances || [];
+  const map = new Map();
+  for (const b of pre) {
+    if (b.owner !== owner) continue;
+    map.set(b.mint, { pre: BigInt(b.uiTokenAmount?.amount || '0'), post: 0n, decimals: b.uiTokenAmount?.decimals || 0 });
+  }
+  for (const b of post) {
+    if (b.owner !== owner) continue;
+    const cur = map.get(b.mint) || { pre: 0n, post: 0n, decimals: b.uiTokenAmount?.decimals || 0 };
+    cur.post = BigInt(b.uiTokenAmount?.amount || '0');
+    cur.decimals = b.uiTokenAmount?.decimals || cur.decimals;
+    map.set(b.mint, cur);
+  }
+  for (const [mint, v] of map) {
+    if (mint === USDC_MINT) continue;
+    const delta = v.post - v.pre;
+    if (delta !== 0n) {
+      changes.push({ mint, delta, decimals: v.decimals, buy: delta > 0n });
+    }
+  }
+  return changes;
+}
+
+async function pollCopy() {
+  const addr = document.getElementById('copyWallet').value.trim();
+  const size = parseFloat(document.getElementById('copySize').value) || 10;
+  const auto = document.getElementById('copyAuto').checked;
+  if (!addr) return;
+  ensureConnection();
+  try {
+    const sigs = await connection.getSignaturesForAddress(new PublicKey(addr), { limit: 5 });
+    for (const s of sigs.reverse()) {
+      if (seenSigs.has(s.signature)) continue;
+      seenSigs.add(s.signature);
+      if (s.err) continue;
+      const tx = await connection.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 });
+      if (!tx) continue;
+      const changes = parseTokenChanges(tx, addr);
+      for (const c of changes) {
+        const side = c.buy ? 'BUY' : 'SELL';
+        const ui = Number(c.delta < 0n ? -c.delta : c.delta) / Math.pow(10, c.decimals);
+        const msg = `${side} ${ui.toFixed(4)} of ${c.mint.slice(0, 6)}...`;
+        log(msg, copyLogEl);
+        notify('Copy signal', msg);
+        if (auto && publicKey && Date.now() - lastTradeAt > 60000) {
+          if (c.buy) {
+            const raw = Math.floor(size * 1e6);
+            log('Mirroring buy with ' + size + ' USDC', copyLogEl);
+            await jupiterSwap(USDC_MINT, c.mint, raw);
+          } else {
+            const tb = await getTokenBalance(c.mint);
+            if (tb.raw > 0n) {
+              log('Mirroring sell of your balance', copyLogEl);
+              await jupiterSwap(c.mint, USDC_MINT, tb.raw.toString());
+            } else {
+              log('No balance to sell', copyLogEl);
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    log('Copy poll error: ' + (e.message || ''), copyLogEl);
+  }
+}
+
+startCopyBtn.onclick = async () => {
+  const addr = document.getElementById('copyWallet').value.trim();
+  if (!addr) { log('Enter wallet', copyLogEl); return; }
+  if (copyInterval) clearInterval(copyInterval);
+  seenSigs = new Set();
+  ensureConnection();
+  try {
+    const recent = await connection.getSignaturesForAddress(new PublicKey(addr), { limit: 10 });
+    recent.forEach(s => seenSigs.add(s.signature));
+  } catch {}
+  log('Copy started for ' + addr.slice(0, 6) + '...', copyLogEl);
+  copyInterval = setInterval(pollCopy, 15000);
+};
+
+stopCopyBtn.onclick = () => {
+  if (copyInterval) clearInterval(copyInterval);
+  log('Copy stopped', copyLogEl);
 };
 
 withdrawBtn.onclick = async () => {
