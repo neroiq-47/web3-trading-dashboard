@@ -2,6 +2,7 @@ const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = 
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const SOL_FEE_BUFFER = 20000000n; // 0.02 SOL
 
 let provider, publicKey, connection, walletLabel = '', fullAddress = '';
 let botInterval, lastTradeAt = 0;
@@ -87,7 +88,7 @@ function saveDay(d) {
 function ensureDay(usdc) {
   let d = loadDay();
   if (!d || d.start <= 0) {
-    d = { date: todayKey(), start: Math.max(0, usdc), spent: d?.spent || 0 };
+    d = { date: todayKey(), start: Math.max(0, usdc), spent: 0 };
     saveDay(d);
   }
   return d;
@@ -102,7 +103,7 @@ function updateDayUi(d) {
   const limit = d.start * (getDailyLossPct() / 100);
   const loss = Math.max(0, d.start - currentUsdc);
   dayStartEl.textContent = d.start.toFixed(2);
-  daySpentEl.textContent = loss.toFixed(2) + ' loss';
+  daySpentEl.textContent = loss.toFixed(2);
   dayLimitEl.textContent = limit.toFixed(2);
 }
 function canBuy(usdc) {
@@ -127,6 +128,7 @@ function log(msg, el = logEl) {
   entry.className = 'log-entry';
   entry.textContent = new Date().toLocaleTimeString() + ': ' + msg;
   el.prepend(entry);
+  while (el.children.length > 80) el.removeChild(el.lastChild);
 }
 function notify(title, body) {
   if (document.getElementById('notify')?.checked && Notification.permission === 'granted') {
@@ -148,12 +150,21 @@ function getJupiterProvider() {
   return null;
 }
 
+function extractPk(resp) {
+  if (!resp) return null;
+  if (resp.publicKey) return resp.publicKey.toString();
+  if (resp.toString && resp.toString().length > 30) return resp.toString();
+  return null;
+}
+
 async function getTokenBalance(mintStr) {
   if (!publicKey || !mintStr) return { raw: 0n, ui: 0, decimals: 0 };
   ensureConnection();
   if (mintStr === SOL_MINT) {
     const lamports = await connection.getBalance(publicKey);
-    return { raw: BigInt(lamports), ui: lamports / LAMPORTS_PER_SOL, decimals: 9 };
+    const raw = BigInt(lamports);
+    const usable = raw > SOL_FEE_BUFFER ? raw - SOL_FEE_BUFFER : 0n;
+    return { raw: usable, ui: Number(usable) / LAMPORTS_PER_SOL, decimals: 9 };
   }
   try {
     const accounts = await connection.getParsedTokenAccountsByOwner(publicKey, { mint: new PublicKey(mintStr) });
@@ -207,7 +218,8 @@ async function connectWallet(getProviderFn, label, installUrl) {
   try {
     provider = wallet;
     const resp = await provider.connect();
-    const pk = resp.publicKey?.toString ? resp.publicKey.toString() : String(resp.publicKey);
+    const pk = extractPk(resp) || extractPk(wallet.publicKey);
+    if (!pk) throw new Error('No public key');
     fullAddress = pk;
     publicKey = new PublicKey(fullAddress);
     ensureConnection();
@@ -317,6 +329,7 @@ async function updateChart(coinId) {
 
 async function jupiterSwap(inputMint, outputMint, amountRaw) {
   if (!provider || !publicKey) { log('Connect wallet first'); return false; }
+  if (inputMint === outputMint) { log('Same mint'); return false; }
   const amt = typeof amountRaw === 'bigint' ? amountRaw.toString() : String(amountRaw);
   if (!amt || amt === '0') { log('Amount is zero'); return false; }
   const jupKey = getJupKey();
@@ -354,9 +367,7 @@ async function jupiterSwap(inputMint, outputMint, amountRaw) {
     const raw = signed.serialize();
     const sig = await connection.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 3 });
     log('Tx: ' + sig);
-    try {
-      await connection.confirmTransaction(sig, 'confirmed');
-    } catch {}
+    try { await connection.confirmTransaction(sig, 'confirmed'); } catch {}
     log('Swap sent');
     notify('Swap sent', sig);
     lastTradeAt = Date.now();
@@ -456,13 +467,14 @@ function parseTokenChanges(tx, owner) {
       changes.push({ mint, delta, decimals: v.decimals, buy: delta > 0n });
     }
   }
-  // Native SOL change (Pump.fun often uses SOL)
+  // Native SOL only if large (ignore fees / dust)
   try {
     const keys = tx.transaction?.message?.accountKeys || [];
     const idx = keys.findIndex(k => (k.pubkey?.toString?.() || k.toString?.()) === owner);
     if (idx >= 0 && meta.preBalances && meta.postBalances) {
       const solDelta = BigInt(meta.postBalances[idx] - meta.preBalances[idx]);
-      if (solDelta !== 0n && Math.abs(Number(solDelta)) > 100000) {
+      const abs = solDelta < 0n ? -solDelta : solDelta;
+      if (abs > 50000000n) { // > 0.05 SOL
         changes.push({ mint: SOL_MINT, delta: solDelta, decimals: 9, buy: solDelta > 0n });
       }
     }
