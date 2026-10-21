@@ -3,8 +3,8 @@ const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
-let provider, publicKey, connection, walletLabel = '';
-let botInterval;
+let provider, publicKey, connection, walletLabel = '', fullAddress = '';
+let botInterval, lastTradeAt = 0;
 let chart, lineSeries;
 
 const connectPhantomBtn = document.getElementById('connectPhantom');
@@ -18,6 +18,7 @@ const logEl = document.getElementById('log');
 const startBtn = document.getElementById('startBot');
 const stopBtn = document.getElementById('stopBot');
 const withdrawBtn = document.getElementById('withdrawBtn');
+const copyAddrBtn = document.getElementById('copyAddr');
 
 if ('Notification' in window && Notification.permission !== 'granted') {
   Notification.requestPermission();
@@ -33,6 +34,10 @@ function getRpc() {
   const key = getHeliusKey();
   return key ? `https://mainnet.helius-rpc.com/?api-key=${key}` : 'https://api.mainnet-beta.solana.com';
 }
+function ensureConnection() {
+  connection = new Connection(getRpc(), 'confirmed');
+  return connection;
+}
 
 function log(msg) {
   const entry = document.createElement('div');
@@ -46,11 +51,16 @@ function notify(title, body) {
   }
 }
 
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
 function getJupiterProvider() {
-  // Jupiter Wallet extension injects under window.jupiter or window.jup
   if (window.jupiter?.solana) return window.jupiter.solana;
   if (window.jup?.solana) return window.jup.solana;
-  // Some builds expose isJupiter on the solana provider
   if (window.solana?.isJupiter) return window.solana;
   return null;
 }
@@ -65,18 +75,19 @@ async function connectWallet(getProviderFn, label, installUrl) {
   try {
     provider = wallet;
     const resp = await provider.connect();
-    publicKey = new PublicKey(resp.publicKey.toString());
-    connection = new Connection(getRpc(), 'confirmed');
+    fullAddress = resp.publicKey.toString();
+    publicKey = new PublicKey(fullAddress);
+    ensureConnection();
     walletLabel = label;
     walletNameEl.textContent = label;
-    addressEl.textContent = publicKey.toString().slice(0, 6) + '...' + publicKey.toString().slice(-4);
+    addressEl.textContent = fullAddress.slice(0, 6) + '...' + fullAddress.slice(-4);
     walletInfo.classList.remove('hidden');
     connectPhantomBtn.textContent = label === 'Phantom' ? 'Connected' : 'Connect Phantom';
     connectJupiterBtn.textContent = label === 'Jupiter' ? 'Connected' : 'Connect Jupiter';
     await refreshBalances();
     log(label + ' connected');
   } catch (e) {
-    alert('Connection failed');
+    alert('Connection failed: ' + (e.message || 'rejected'));
     console.error(e);
   }
 }
@@ -93,8 +104,19 @@ connectJupiterBtn.onclick = () => connectWallet(
   'https://jup.ag/wallet'
 );
 
+copyAddrBtn.onclick = async () => {
+  if (!fullAddress) return;
+  try {
+    await navigator.clipboard.writeText(fullAddress);
+    log('Address copied');
+  } catch {
+    log('Copy failed');
+  }
+};
+
 async function refreshBalances() {
-  if (!publicKey || !connection) return;
+  if (!publicKey) return;
+  ensureConnection();
   try {
     const sol = await connection.getBalance(publicKey);
     solBalEl.textContent = (sol / LAMPORTS_PER_SOL).toFixed(4);
@@ -164,10 +186,14 @@ async function jupiterSwap(inputMint, outputMint, amountRaw) {
   if (!provider || !publicKey) { log('Connect wallet first'); return; }
   const jupKey = getJupKey();
   if (!jupKey) { log('Enter Jupiter API key'); return; }
+  ensureConnection();
   try {
     const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountRaw}&slippageBps=100`;
     const quoteRes = await fetch(quoteUrl, { headers: { 'x-api-key': jupKey } });
-    if (!quoteRes.ok) throw new Error('Quote failed');
+    if (!quoteRes.ok) {
+      const t = await quoteRes.text();
+      throw new Error('Quote failed: ' + t.slice(0, 120));
+    }
     const quote = await quoteRes.json();
 
     const swapRes = await fetch('https://api.jup.ag/swap/v1/swap', {
@@ -180,18 +206,23 @@ async function jupiterSwap(inputMint, outputMint, amountRaw) {
         dynamicComputeUnitLimit: true
       })
     });
-    if (!swapRes.ok) throw new Error('Swap build failed');
+    if (!swapRes.ok) {
+      const t = await swapRes.text();
+      throw new Error('Swap build failed: ' + t.slice(0, 120));
+    }
     const { swapTransaction } = await swapRes.json();
+    if (!swapTransaction) throw new Error('No swap transaction returned');
 
-    const txBuf = Uint8Array.from(atob(swapTransaction), c => c.charCodeAt(0));
-    const tx = solanaWeb3.VersionedTransaction.deserialize(txBuf);
+    const tx = solanaWeb3.VersionedTransaction.deserialize(base64ToBytes(swapTransaction));
     log('Prompting ' + walletLabel + ' to sign...');
     const signed = await provider.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize());
+    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, maxRetries: 3 });
     log('Tx: ' + sig);
-    await connection.confirmTransaction(sig, 'confirmed');
+    const conf = await connection.confirmTransaction(sig, 'confirmed');
+    if (conf.value?.err) throw new Error('Tx failed on chain');
     log('Swap confirmed');
     notify('Swap confirmed', sig);
+    lastTradeAt = Date.now();
     await refreshBalances();
   } catch (e) {
     log('Swap failed: ' + (e.message || 'error'));
@@ -208,7 +239,7 @@ startBtn.onclick = () => {
   const tokenMint = document.getElementById('tokenMint').value.trim();
   if (!coin || !tokenMint) { log('Fill coin and mint'); return; }
   if (botInterval) clearInterval(botInterval);
-  log('Monitor started' + (auto ? ' (auto ON)' : ''));
+  log('Monitor started' + (auto ? ' (auto ON, 2 min cooldown)' : ''));
   updateChart(coin);
   botInterval = setInterval(async () => {
     try {
@@ -219,19 +250,24 @@ startBtn.onclick = () => {
       if (!price) { log('Coin not found'); return; }
       log(`${coin}: $${price}`);
       const amountRaw = Math.floor(usdcAmt * 1e6);
+      const cooled = Date.now() - lastTradeAt > 120000;
+
       if (buy && price < buy) {
         const msg = `BUY SIGNAL: ${coin} below ${buy}`;
         log(msg);
         notify('Buy Signal', msg);
-        if (auto) await jupiterSwap(USDC_MINT, tokenMint, amountRaw);
+        if (auto && cooled) await jupiterSwap(USDC_MINT, tokenMint, amountRaw);
+        else if (auto && !cooled) log('Cooldown active, skip buy');
       }
       if (sell && price > sell) {
         const msg = `SELL SIGNAL: ${coin} above ${sell}`;
         log(msg);
         notify('Sell Signal', msg);
-        if (auto && tokenMint === SOL_MINT) {
+        if (auto && cooled && tokenMint === SOL_MINT) {
           const solRaw = Math.floor((usdcAmt / price) * LAMPORTS_PER_SOL);
           await jupiterSwap(SOL_MINT, USDC_MINT, solRaw);
+        } else if (auto && tokenMint !== SOL_MINT) {
+          log('Sell auto only supports SOL mint for now (needs token balance)');
         }
       }
       updateChart(coin);
@@ -245,7 +281,8 @@ stopBtn.onclick = () => {
 };
 
 withdrawBtn.onclick = async () => {
-  if (!provider || !publicKey || !connection) { log('Connect wallet first'); return; }
+  if (!provider || !publicKey) { log('Connect wallet first'); return; }
+  ensureConnection();
   const to = document.getElementById('withdrawTo').value.trim();
   const amt = parseFloat(document.getElementById('withdrawAmt').value);
   if (!to || !amt || amt <= 0) { log('Invalid withdraw'); return; }

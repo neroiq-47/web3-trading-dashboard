@@ -27,7 +27,10 @@
 
     <section id="walletInfo" class="hidden">
       <p>Wallet: <span id="walletName"></span></p>
-      <p>Address: <span id="address"></span></p>
+      <div class="addr-row">
+        <p style="margin:0">Address: <span id="address"></span></p>
+        <button id="copyAddr" class="secondary" type="button">Copy</button>
+      </div>
       <p>SOL: <span id="solBal">0</span> &nbsp;|&nbsp; USDC: <span id="usdcBal">0</span></p>
       <p class="hint">Fund by sending USDC to your address above. Keep a little SOL for fees.</p>
     </section>
@@ -44,10 +47,10 @@
 
     <section class="bot">
       <h2>Live Auto-Trade</h2>
-      <p>Signals trigger Jupiter swaps (USDC ↔ token). Every trade prompts your connected wallet. Live only.</p>
+      <p>Signals trigger Jupiter swaps (USDC ↔ token). Every trade prompts your connected wallet. Live only. Auto waits 2 min between trades.</p>
 
-      <label>Jupiter API key <input id="jupKey" type="password" placeholder="jup_..."></label>
-      <label>Helius API key <input id="heliusKey" type="password" placeholder="helius key"></label>
+      <label>Jupiter API key <input id="jupKey" type="password" placeholder="jup_..." autocomplete="off"></label>
+      <label>Helius API key <input id="heliusKey" type="password" placeholder="helius key" autocomplete="off"></label>
 
       <label>Token mint (buy target) <input id="tokenMint" value="So11111111111111111111111111111111111111112" placeholder="mint address"></label>
       <label>Coin ID for price (CoinGecko) <input id="coinId" value="solana"></label>

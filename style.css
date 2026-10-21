@@ -71,6 +71,10 @@ button:hover {
   box-shadow: 0 4px 12px rgba(106, 13, 173, 0.4);
 }
 button:active { transform: translateY(0); }
+button.secondary {
+  background: #222;
+  border: 1px solid var(--purple);
+}
 .hidden { display: none; }
 #walletInfo {
   background: var(--card);
@@ -82,6 +86,12 @@ button:active { transform: translateY(0); }
 }
 #walletInfo p { margin: 0.25rem 0; }
 #walletInfo span { color: var(--gold); font-weight: 600; }
+.addr-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 .coins {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -115,7 +125,7 @@ label {
   font-size: 0.9rem;
   color: #ccc;
 }
-input[type="number"], input[type="text"] {
+input[type="number"], input[type="text"], input[type="password"] {
   background: #1a1a1a;
   color: white;
   border: 1px solid var(--purple);
@@ -157,7 +167,7 @@ input:focus {
   h1 { font-size: 1.4rem; }
   .logo { width: 32px; height: 32px; }
   .coins { grid-template-columns: 1fr 1fr; }
-  input[type="number"], input[type="text"] { max-width: 100%; }
+  input[type="number"], input[type="text"], input[type="password"] { max-width: 100%; }
   button { width: 100%; }
   .btn-row button { flex: 1; }
 }
