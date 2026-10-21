@@ -3,12 +3,14 @@ const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
-let provider, publicKey, connection;
+let provider, publicKey, connection, walletLabel = '';
 let botInterval;
 let chart, lineSeries;
 
-const connectBtn = document.getElementById('connectBtn');
+const connectPhantomBtn = document.getElementById('connectPhantom');
+const connectJupiterBtn = document.getElementById('connectJupiter');
 const walletInfo = document.getElementById('walletInfo');
+const walletNameEl = document.getElementById('walletName');
 const addressEl = document.getElementById('address');
 const solBalEl = document.getElementById('solBal');
 const usdcBalEl = document.getElementById('usdcBal');
@@ -44,6 +46,53 @@ function notify(title, body) {
   }
 }
 
+function getJupiterProvider() {
+  // Jupiter Wallet extension injects under window.jupiter or window.jup
+  if (window.jupiter?.solana) return window.jupiter.solana;
+  if (window.jup?.solana) return window.jup.solana;
+  // Some builds expose isJupiter on the solana provider
+  if (window.solana?.isJupiter) return window.solana;
+  return null;
+}
+
+async function connectWallet(getProviderFn, label, installUrl) {
+  const wallet = getProviderFn();
+  if (!wallet) {
+    alert(`Install ${label} wallet`);
+    if (installUrl) window.open(installUrl, '_blank');
+    return;
+  }
+  try {
+    provider = wallet;
+    const resp = await provider.connect();
+    publicKey = new PublicKey(resp.publicKey.toString());
+    connection = new Connection(getRpc(), 'confirmed');
+    walletLabel = label;
+    walletNameEl.textContent = label;
+    addressEl.textContent = publicKey.toString().slice(0, 6) + '...' + publicKey.toString().slice(-4);
+    walletInfo.classList.remove('hidden');
+    connectPhantomBtn.textContent = label === 'Phantom' ? 'Connected' : 'Connect Phantom';
+    connectJupiterBtn.textContent = label === 'Jupiter' ? 'Connected' : 'Connect Jupiter';
+    await refreshBalances();
+    log(label + ' connected');
+  } catch (e) {
+    alert('Connection failed');
+    console.error(e);
+  }
+}
+
+connectPhantomBtn.onclick = () => connectWallet(
+  () => window.phantom?.solana || (window.solana?.isPhantom ? window.solana : null),
+  'Phantom',
+  'https://phantom.app'
+);
+
+connectJupiterBtn.onclick = () => connectWallet(
+  getJupiterProvider,
+  'Jupiter',
+  'https://jup.ag/wallet'
+);
+
 async function refreshBalances() {
   if (!publicKey || !connection) return;
   try {
@@ -59,28 +108,6 @@ async function refreshBalances() {
     console.error(e);
   }
 }
-
-connectBtn.onclick = async () => {
-  const phantom = window.phantom?.solana || window.solana;
-  if (!phantom?.isPhantom) {
-    alert('Install Phantom wallet');
-    return;
-  }
-  try {
-    provider = phantom;
-    const resp = await provider.connect();
-    publicKey = new PublicKey(resp.publicKey.toString());
-    connection = new Connection(getRpc(), 'confirmed');
-    addressEl.textContent = publicKey.toString().slice(0, 6) + '...' + publicKey.toString().slice(-4);
-    walletInfo.classList.remove('hidden');
-    connectBtn.textContent = 'Connected';
-    await refreshBalances();
-    log('Wallet connected');
-  } catch (e) {
-    alert('Connection failed');
-    console.error(e);
-  }
-};
 
 async function loadCoins() {
   try {
@@ -158,7 +185,7 @@ async function jupiterSwap(inputMint, outputMint, amountRaw) {
 
     const txBuf = Uint8Array.from(atob(swapTransaction), c => c.charCodeAt(0));
     const tx = solanaWeb3.VersionedTransaction.deserialize(txBuf);
-    log('Prompting Phantom to sign...');
+    log('Prompting ' + walletLabel + ' to sign...');
     const signed = await provider.signTransaction(tx);
     const sig = await connection.sendRawTransaction(signed.serialize());
     log('Tx: ' + sig);
@@ -191,7 +218,7 @@ startBtn.onclick = () => {
       const price = data[coin]?.usd;
       if (!price) { log('Coin not found'); return; }
       log(`${coin}: $${price}`);
-      const amountRaw = Math.floor(usdcAmt * 1e6); // USDC 6 decimals
+      const amountRaw = Math.floor(usdcAmt * 1e6);
       if (buy && price < buy) {
         const msg = `BUY SIGNAL: ${coin} below ${buy}`;
         log(msg);
@@ -202,7 +229,6 @@ startBtn.onclick = () => {
         const msg = `SELL SIGNAL: ${coin} above ${sell}`;
         log(msg);
         notify('Sell Signal', msg);
-        // Sell requires token balance; for SOL we can reverse. For other mints user must hold the token.
         if (auto && tokenMint === SOL_MINT) {
           const solRaw = Math.floor((usdcAmt / price) * LAMPORTS_PER_SOL);
           await jupiterSwap(SOL_MINT, USDC_MINT, solRaw);
@@ -235,7 +261,7 @@ withdrawBtn.onclick = async () => {
     tx.feePayer = publicKey;
     const { blockhash } = await connection.getLatestBlockhash();
     tx.recentBlockhash = blockhash;
-    log('Prompting Phantom for withdraw...');
+    log('Prompting ' + walletLabel + ' for withdraw...');
     const signed = await provider.signTransaction(tx);
     const sig = await connection.sendRawTransaction(signed.serialize());
     log('Withdraw tx: ' + sig);
