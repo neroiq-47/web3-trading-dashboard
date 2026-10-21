@@ -6,6 +6,8 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 let provider, publicKey, connection, walletLabel = '', fullAddress = '';
 let botInterval, lastTradeAt = 0;
 let chart, lineSeries;
+let tokenBalanceRaw = 0n;
+let tokenDecimals = 0;
 
 const connectPhantomBtn = document.getElementById('connectPhantom');
 const connectJupiterBtn = document.getElementById('connectJupiter');
@@ -14,11 +16,14 @@ const walletNameEl = document.getElementById('walletName');
 const addressEl = document.getElementById('address');
 const solBalEl = document.getElementById('solBal');
 const usdcBalEl = document.getElementById('usdcBal');
+const tokenBalEl = document.getElementById('tokenBal');
 const logEl = document.getElementById('log');
 const startBtn = document.getElementById('startBot');
 const stopBtn = document.getElementById('stopBot');
 const withdrawBtn = document.getElementById('withdrawBtn');
 const copyAddrBtn = document.getElementById('copyAddr');
+const refreshTokenBtn = document.getElementById('refreshToken');
+const tokenMintInput = document.getElementById('tokenMint');
 
 if ('Notification' in window && Notification.permission !== 'granted') {
   Notification.requestPermission();
@@ -63,6 +68,50 @@ function getJupiterProvider() {
   if (window.jup?.solana) return window.jup.solana;
   if (window.solana?.isJupiter) return window.solana;
   return null;
+}
+
+async function getTokenBalance(mintStr) {
+  if (!publicKey || !mintStr) return { raw: 0n, ui: 0, decimals: 0 };
+  ensureConnection();
+  if (mintStr === SOL_MINT) {
+    const lamports = await connection.getBalance(publicKey);
+    return { raw: BigInt(lamports), ui: lamports / LAMPORTS_PER_SOL, decimals: 9 };
+  }
+  try {
+    const accounts = await connection.getParsedTokenAccountsByOwner(publicKey, { mint: new PublicKey(mintStr) });
+    if (!accounts.value.length) return { raw: 0n, ui: 0, decimals: 0 };
+    const info = accounts.value[0].account.data.parsed.info.tokenAmount;
+    return {
+      raw: BigInt(info.amount),
+      ui: info.uiAmount || 0,
+      decimals: info.decimals || 0
+    };
+  } catch {
+    return { raw: 0n, ui: 0, decimals: 0 };
+  }
+}
+
+async function refreshBalances() {
+  if (!publicKey) return;
+  ensureConnection();
+  try {
+    const sol = await connection.getBalance(publicKey);
+    solBalEl.textContent = (sol / LAMPORTS_PER_SOL).toFixed(4);
+    const usdcAcc = await connection.getParsedTokenAccountsByOwner(publicKey, { mint: new PublicKey(USDC_MINT) });
+    let usdc = 0;
+    if (usdcAcc.value.length) {
+      usdc = usdcAcc.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
+    }
+    usdcBalEl.textContent = usdc.toFixed(2);
+
+    const mint = tokenMintInput.value.trim();
+    const tb = await getTokenBalance(mint);
+    tokenBalanceRaw = tb.raw;
+    tokenDecimals = tb.decimals;
+    tokenBalEl.textContent = tb.ui.toFixed(Math.min(tb.decimals || 4, 6));
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 async function connectWallet(getProviderFn, label, installUrl) {
@@ -114,22 +163,15 @@ copyAddrBtn.onclick = async () => {
   }
 };
 
-async function refreshBalances() {
-  if (!publicKey) return;
-  ensureConnection();
-  try {
-    const sol = await connection.getBalance(publicKey);
-    solBalEl.textContent = (sol / LAMPORTS_PER_SOL).toFixed(4);
-    const accounts = await connection.getParsedTokenAccountsByOwner(publicKey, { mint: new PublicKey(USDC_MINT) });
-    let usdc = 0;
-    if (accounts.value.length) {
-      usdc = accounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
-    }
-    usdcBalEl.textContent = usdc.toFixed(2);
-  } catch (e) {
-    console.error(e);
-  }
-}
+refreshTokenBtn.onclick = async () => {
+  if (!publicKey) { log('Connect wallet first'); return; }
+  await refreshBalances();
+  log('Balances refreshed');
+};
+
+tokenMintInput.addEventListener('change', () => {
+  if (publicKey) refreshBalances();
+});
 
 async function loadCoins() {
   try {
@@ -184,6 +226,7 @@ async function updateChart(coinId) {
 
 async function jupiterSwap(inputMint, outputMint, amountRaw) {
   if (!provider || !publicKey) { log('Connect wallet first'); return; }
+  if (!amountRaw || amountRaw <= 0) { log('Amount is zero'); return; }
   const jupKey = getJupKey();
   if (!jupKey) { log('Enter Jupiter API key'); return; }
   ensureConnection();
@@ -236,11 +279,12 @@ startBtn.onclick = () => {
   const sell = parseFloat(document.getElementById('sellAbove').value);
   const usdcAmt = parseFloat(document.getElementById('tradeUsdc').value) || 10;
   const auto = document.getElementById('autoTrade').checked;
-  const tokenMint = document.getElementById('tokenMint').value.trim();
+  const tokenMint = tokenMintInput.value.trim();
   if (!coin || !tokenMint) { log('Fill coin and mint'); return; }
   if (botInterval) clearInterval(botInterval);
   log('Monitor started' + (auto ? ' (auto ON, 2 min cooldown)' : ''));
   updateChart(coin);
+  refreshBalances();
   botInterval = setInterval(async () => {
     try {
       const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${coin}&vs_currencies=usd`);
@@ -249,26 +293,33 @@ startBtn.onclick = () => {
       const price = data[coin]?.usd;
       if (!price) { log('Coin not found'); return; }
       log(`${coin}: $${price}`);
-      const amountRaw = Math.floor(usdcAmt * 1e6);
+      const buyRaw = Math.floor(usdcAmt * 1e6);
       const cooled = Date.now() - lastTradeAt > 120000;
 
       if (buy && price < buy) {
         const msg = `BUY SIGNAL: ${coin} below ${buy}`;
         log(msg);
         notify('Buy Signal', msg);
-        if (auto && cooled) await jupiterSwap(USDC_MINT, tokenMint, amountRaw);
+        if (auto && cooled) await jupiterSwap(USDC_MINT, tokenMint, buyRaw);
         else if (auto && !cooled) log('Cooldown active, skip buy');
       }
       if (sell && price > sell) {
         const msg = `SELL SIGNAL: ${coin} above ${sell}`;
         log(msg);
         notify('Sell Signal', msg);
-        if (auto && cooled && tokenMint === SOL_MINT) {
-          const solRaw = Math.floor((usdcAmt / price) * LAMPORTS_PER_SOL);
-          await jupiterSwap(SOL_MINT, USDC_MINT, solRaw);
-        } else if (auto && tokenMint !== SOL_MINT) {
-          log('Sell auto only supports SOL mint for now (needs token balance)');
-        }
+        if (auto && cooled) {
+          const tb = await getTokenBalance(tokenMint);
+          tokenBalanceRaw = tb.raw;
+          tokenDecimals = tb.decimals;
+          tokenBalEl.textContent = tb.ui.toFixed(Math.min(tb.decimals || 4, 6));
+          if (tb.raw > 0n) {
+            const sellRaw = tb.raw.toString();
+            log(`Selling ${tb.ui} token (raw ${sellRaw})`);
+            await jupiterSwap(tokenMint, USDC_MINT, sellRaw);
+          } else {
+            log('No token balance to sell');
+          }
+        } else if (auto && !cooled) log('Cooldown active, skip sell');
       }
       updateChart(coin);
     } catch (e) { log('Price error'); }
