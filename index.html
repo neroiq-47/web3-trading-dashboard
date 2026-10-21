@@ -6,7 +6,7 @@
   <title>Web3 Trading Bot</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
   <div class="container">
@@ -20,7 +20,7 @@
     </section>
     <section class="chart-section">
       <h2>Live Chart</h2>
-      <canvas id="priceChart" height="120"></canvas>
+      <div id="priceChart" style="height:220px;"></div>
     </section>
     <section class="market">
       <h2>Live Market</h2>
@@ -29,11 +29,13 @@
     <section class="bot">
       <h2>Simple Bot</h2>
       <p>Monitor prices. Auto-trade prompts MetaMask for live Uniswap swaps (Ethereum mainnet).</p>
-      <label>Coin ID (e.g. bitcoin, ethereum, usd-coin): <input id="coinId" value="ethereum"></label>
+      <label>Coin ID (e.g. bitcoin, ethereum): <input id="coinId" value="ethereum"></label>
+      <label>Token address (for buy): <input id="tokenAddress" value="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" placeholder="0x..."></label>
       <label>Buy below ($): <input id="buyBelow" type="number" placeholder="price"></label>
       <label>Sell above ($): <input id="sellAbove" type="number" placeholder="price"></label>
       <label>Trade amount (ETH): <input id="tradeAmount" type="number" value="0.01" step="0.001"></label>
       <label><input type="checkbox" id="autoTrade"> Auto-execute on signal (prompts MetaMask)</label>
+      <label><input type="checkbox" id="notify" checked> Browser notifications on signals</label>
       <button id="startBot">Start Monitor</button>
       <button id="stopBot">Stop</button>
       <div id="log"></div>
