@@ -1,12 +1,17 @@
-# Web3 Trading Dashboard
+# Web3 Trading Bot
 
-Minimal black / purple / gold design.
+Simple live MetaMask + Uniswap dashboard.
 
-Connect MetaMask, fund your wallet, view live prices, and run a simple monitor bot.
+## Deploy to Cloudflare Pages
 
-Signals appear in the log. Confirm any live trades yourself in MetaMask.
+1. Go to Cloudflare dashboard → Workers & Pages → Create application → Pages → Connect to Git.
+2. Authorize GitHub and select this repo (`web3-trading-dashboard`).
+3. Settings:
+   - Production branch: `main`
+   - Build command: *(leave empty)*
+   - Build output directory: `/` (root)
+4. Save and Deploy.
 
-## Deploy
-Push to GitHub and connect to Netlify, or drag the folder to Netlify drop.
+Every push to `main` auto-deploys.
 
-Live only — no paper trading.
+Site will be at `https://web3-trading-dashboard.pages.dev` (or your custom domain).
