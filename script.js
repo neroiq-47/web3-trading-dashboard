@@ -86,8 +86,8 @@ function saveDay(d) {
 }
 function ensureDay(usdc) {
   let d = loadDay();
-  if (!d) {
-    d = { date: todayKey(), start: usdc, spent: 0 };
+  if (!d || d.start <= 0) {
+    d = { date: todayKey(), start: Math.max(0, usdc), spent: d?.spent || 0 };
     saveDay(d);
   }
   return d;
@@ -100,30 +100,26 @@ function updateDayUi(d) {
     return;
   }
   const limit = d.start * (getDailyLossPct() / 100);
+  const loss = Math.max(0, d.start - currentUsdc);
   dayStartEl.textContent = d.start.toFixed(2);
-  daySpentEl.textContent = d.spent.toFixed(2);
+  daySpentEl.textContent = loss.toFixed(2) + ' loss';
   dayLimitEl.textContent = limit.toFixed(2);
 }
 function canBuy(usdc) {
   const d = ensureDay(usdc);
   const limit = d.start * (getDailyLossPct() / 100);
+  const loss = Math.max(0, d.start - usdc);
   updateDayUi(d);
-  if (d.spent >= limit) {
-    log('Daily loss limit hit. Buys blocked.');
+  if (d.start > 0 && loss >= limit) {
+    log('Daily loss limit hit (' + loss.toFixed(2) + ' / ' + limit.toFixed(2) + '). Buys blocked.');
     return false;
   }
   return true;
 }
-function recordSpend(amount) {
-  const d = ensureDay(currentUsdc);
-  d.spent += amount;
-  saveDay(d);
-  updateDayUi(d);
-}
 function tradeSizeUsdc() {
   const pct = getRiskPct();
   const size = currentUsdc * (pct / 100);
-  return Math.max(0, size);
+  return Math.max(0, Math.min(size, currentUsdc * 0.95));
 }
 
 function log(msg, el = logEl) {
@@ -186,14 +182,16 @@ async function refreshBalances() {
     }
     currentUsdc = usdc;
     usdcBalEl.textContent = usdc.toFixed(2);
-    ensureDay(usdc);
-    updateDayUi(loadDay());
+    const d = ensureDay(usdc);
+    updateDayUi(d);
 
     const mint = tokenMintInput.value.trim();
-    const tb = await getTokenBalance(mint);
-    tokenBalanceRaw = tb.raw;
-    tokenDecimals = tb.decimals;
-    tokenBalEl.textContent = tb.ui.toFixed(Math.min(tb.decimals || 4, 6));
+    if (mint) {
+      const tb = await getTokenBalance(mint);
+      tokenBalanceRaw = tb.raw;
+      tokenDecimals = tb.decimals;
+      tokenBalEl.textContent = tb.ui.toFixed(Math.min(tb.decimals || 4, 6));
+    }
   } catch (e) {
     console.error(e);
   }
@@ -209,7 +207,8 @@ async function connectWallet(getProviderFn, label, installUrl) {
   try {
     provider = wallet;
     const resp = await provider.connect();
-    fullAddress = resp.publicKey.toString();
+    const pk = resp.publicKey?.toString ? resp.publicKey.toString() : String(resp.publicKey);
+    fullAddress = pk;
     publicKey = new PublicKey(fullAddress);
     ensureConnection();
     walletLabel = label;
@@ -316,14 +315,15 @@ async function updateChart(coinId) {
   } catch (e) {}
 }
 
-async function jupiterSwap(inputMint, outputMint, amountRaw, spendUsdc = 0) {
+async function jupiterSwap(inputMint, outputMint, amountRaw) {
   if (!provider || !publicKey) { log('Connect wallet first'); return false; }
-  if (!amountRaw || amountRaw <= 0) { log('Amount is zero'); return false; }
+  const amt = typeof amountRaw === 'bigint' ? amountRaw.toString() : String(amountRaw);
+  if (!amt || amt === '0') { log('Amount is zero'); return false; }
   const jupKey = getJupKey();
   if (!jupKey) { log('Enter Jupiter API key'); return false; }
   ensureConnection();
   try {
-    const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountRaw}&slippageBps=100`;
+    const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amt}&slippageBps=100`;
     const quoteRes = await fetch(quoteUrl, { headers: { 'x-api-key': jupKey } });
     if (!quoteRes.ok) {
       const t = await quoteRes.text();
@@ -351,14 +351,15 @@ async function jupiterSwap(inputMint, outputMint, amountRaw, spendUsdc = 0) {
     const tx = solanaWeb3.VersionedTransaction.deserialize(base64ToBytes(swapTransaction));
     log('Prompting ' + walletLabel + ' to sign...');
     const signed = await provider.signTransaction(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false, maxRetries: 3 });
+    const raw = signed.serialize();
+    const sig = await connection.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 3 });
     log('Tx: ' + sig);
-    const conf = await connection.confirmTransaction(sig, 'confirmed');
-    if (conf.value?.err) throw new Error('Tx failed on chain');
-    log('Swap confirmed');
-    notify('Swap confirmed', sig);
+    try {
+      await connection.confirmTransaction(sig, 'confirmed');
+    } catch {}
+    log('Swap sent');
+    notify('Swap sent', sig);
     lastTradeAt = Date.now();
-    if (spendUsdc > 0) recordSpend(spendUsdc);
     await refreshBalances();
     return true;
   } catch (e) {
@@ -376,7 +377,7 @@ startBtn.onclick = () => {
   const tokenMint = tokenMintInput.value.trim();
   if (!coin || !tokenMint) { log('Fill coin and mint'); return; }
   if (botInterval) clearInterval(botInterval);
-  log('Monitor started' + (auto ? ' (auto ON, 0.5% risk)' : ''));
+  log('Monitor started' + (auto ? ' (auto ON, risk size)' : ''));
   updateChart(coin);
   refreshBalances();
   botInterval = setInterval(async () => {
@@ -394,12 +395,13 @@ startBtn.onclick = () => {
         log(msg);
         notify('Buy Signal', msg);
         if (auto && cooled) {
+          await refreshBalances();
           if (!canBuy(currentUsdc)) return;
           const usdcAmt = tradeSizeUsdc();
           if (usdcAmt < 0.5) { log('Size too small'); return; }
           const buyRaw = Math.floor(usdcAmt * 1e6);
           log(`Risk size: ${usdcAmt.toFixed(2)} USDC`);
-          await jupiterSwap(USDC_MINT, tokenMint, buyRaw, usdcAmt);
+          await jupiterSwap(USDC_MINT, tokenMint, buyRaw);
         } else if (auto && !cooled) log('Cooldown active, skip buy');
       }
       if (sell && price > sell) {
@@ -412,9 +414,8 @@ startBtn.onclick = () => {
           tokenDecimals = tb.decimals;
           tokenBalEl.textContent = tb.ui.toFixed(Math.min(tb.decimals || 4, 6));
           if (tb.raw > 0n) {
-            const sellRaw = tb.raw.toString();
             log(`Selling ${tb.ui} token`);
-            await jupiterSwap(tokenMint, USDC_MINT, sellRaw, 0);
+            await jupiterSwap(tokenMint, USDC_MINT, tb.raw);
           } else {
             log('No token balance to sell');
           }
@@ -455,6 +456,17 @@ function parseTokenChanges(tx, owner) {
       changes.push({ mint, delta, decimals: v.decimals, buy: delta > 0n });
     }
   }
+  // Native SOL change (Pump.fun often uses SOL)
+  try {
+    const keys = tx.transaction?.message?.accountKeys || [];
+    const idx = keys.findIndex(k => (k.pubkey?.toString?.() || k.toString?.()) === owner);
+    if (idx >= 0 && meta.preBalances && meta.postBalances) {
+      const solDelta = BigInt(meta.postBalances[idx] - meta.preBalances[idx]);
+      if (solDelta !== 0n && Math.abs(Number(solDelta)) > 100000) {
+        changes.push({ mint: SOL_MINT, delta: solDelta, decimals: 9, buy: solDelta > 0n });
+      }
+    }
+  } catch {}
   return changes;
 }
 
@@ -477,17 +489,18 @@ async function pollOneWallet(addr, auto) {
         notify('Copy signal', msg);
         if (auto && publicKey && Date.now() - lastTradeAt > 60000) {
           if (c.buy) {
+            await refreshBalances();
             if (!canBuy(currentUsdc)) continue;
             const usdcAmt = tradeSizeUsdc();
             if (usdcAmt < 0.5) { log(`[${short}] Size too small`, copyLogEl); continue; }
             const raw = Math.floor(usdcAmt * 1e6);
             log(`[${short}] Mirroring buy ${usdcAmt.toFixed(2)} USDC`, copyLogEl);
-            await jupiterSwap(USDC_MINT, c.mint, raw, usdcAmt);
+            await jupiterSwap(USDC_MINT, c.mint, raw);
           } else {
             const tb = await getTokenBalance(c.mint);
             if (tb.raw > 0n) {
               log(`[${short}] Mirroring sell`, copyLogEl);
-              await jupiterSwap(c.mint, USDC_MINT, tb.raw.toString(), 0);
+              await jupiterSwap(c.mint, USDC_MINT, tb.raw);
             } else {
               log(`[${short}] No balance to sell`, copyLogEl);
             }
@@ -553,8 +566,8 @@ withdrawBtn.onclick = async () => {
     const signed = await provider.signTransaction(tx);
     const sig = await connection.sendRawTransaction(signed.serialize());
     log('Withdraw tx: ' + sig);
-    await connection.confirmTransaction(sig, 'confirmed');
-    log('Withdraw confirmed');
+    try { await connection.confirmTransaction(sig, 'confirmed'); } catch {}
+    log('Withdraw sent');
     await refreshBalances();
   } catch (e) {
     log('Withdraw failed: ' + (e.message || 'error'));
