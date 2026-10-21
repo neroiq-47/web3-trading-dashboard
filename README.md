@@ -1,17 +1,23 @@
-# Web3 Trading Bot
+# Solana Trader
 
-Simple live MetaMask + Uniswap dashboard.
+Live Solana dashboard. Phantom wallet. USDC funding. Simple SOL withdrawals. Jupiter auto-trades (wallet prompt each time).
 
-## Deploy to Cloudflare Pages
+## Deploy (Cloudflare Pages)
 
-1. Go to Cloudflare dashboard → Workers & Pages → Create application → Pages → Connect to Git.
-2. Authorize GitHub and select this repo (`web3-trading-dashboard`).
-3. Settings:
-   - Production branch: `main`
-   - Build command: *(leave empty)*
-   - Build output directory: `/` (root)
-4. Save and Deploy.
+1. Workers & Pages → Create → Pages → Connect to Git
+2. Select this repo, branch `main`
+3. Build command: empty
+4. Output directory: `/`
+5. Deploy
 
-Every push to `main` auto-deploys.
+## Use
 
-Site will be at `https://web3-trading-dashboard.pages.dev` (or your custom domain).
+1. Open the site
+2. Connect Phantom
+3. Paste Jupiter + Helius keys (stored only in your browser session)
+4. Fund by sending USDC to your address (keep some SOL for fees)
+5. Set buy/sell prices and USDC trade size
+6. Start Monitor — signals can auto-prompt Jupiter swaps
+7. Withdraw SOL anytime
+
+Keys are never written to the repo.

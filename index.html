@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Web3 Trading Bot</title>
+  <title>Solana Trader</title>
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js"></script>
+  <script src="https://unpkg.com/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -17,37 +17,57 @@
           <circle fill="#ffffff" cx="19.5" cy="18.5" r="1.2"/>
           <circle fill="#ffffff" cx="28.5" cy="18.5" r="1.2"/>
         </svg>
-        <h1>Web3 Trader</h1>
+        <h1>Solana Trader</h1>
       </div>
-      <button id="connectBtn">Connect Wallet</button>
+      <button id="connectBtn">Connect Phantom</button>
     </header>
+
     <section id="walletInfo" class="hidden">
       <p>Address: <span id="address"></span></p>
-      <p>Balance: <span id="balance">0</span> ETH</p>
+      <p>SOL: <span id="solBal">0</span> &nbsp;|&nbsp; USDC: <span id="usdcBal">0</span></p>
+      <p class="hint">Fund by sending USDC to your address above. Keep a little SOL for fees.</p>
     </section>
+
     <section class="chart-section">
       <h2>Live Chart</h2>
       <div id="priceChart" style="height:220px;"></div>
     </section>
+
     <section class="market">
       <h2>Live Market</h2>
       <div id="coins" class="coins"></div>
     </section>
+
     <section class="bot">
-      <h2>Simple Bot</h2>
-      <p>Monitor prices. Auto-trade prompts MetaMask for live Uniswap swaps (Ethereum mainnet). Uses 5% slippage protection.</p>
-      <label>Coin ID (e.g. bitcoin, ethereum): <input id="coinId" value="ethereum"></label>
-      <label>Token address (for buy): <input id="tokenAddress" value="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" placeholder="0x..."></label>
-      <label>Buy below ($): <input id="buyBelow" type="number" placeholder="price"></label>
-      <label>Sell above ($): <input id="sellAbove" type="number" placeholder="price"></label>
-      <label>Trade amount (ETH): <input id="tradeAmount" type="number" value="0.01" step="0.001"></label>
-      <label><input type="checkbox" id="autoTrade"> Auto-execute on signal (prompts MetaMask)</label>
-      <label><input type="checkbox" id="notify" checked> Browser notifications on signals</label>
+      <h2>Live Auto-Trade</h2>
+      <p>Signals trigger Jupiter swaps (USDC ↔ token). Every trade prompts Phantom. Live only.</p>
+
+      <label>Jupiter API key <input id="jupKey" type="password" placeholder="jup_..."></label>
+      <label>Helius API key <input id="heliusKey" type="password" placeholder="helius key"></label>
+
+      <label>Token mint (buy target) <input id="tokenMint" value="So11111111111111111111111111111111111111112" placeholder="mint address"></label>
+      <label>Coin ID for price (CoinGecko) <input id="coinId" value="solana"></label>
+      <label>Buy below ($) <input id="buyBelow" type="number" placeholder="price"></label>
+      <label>Sell above ($) <input id="sellAbove" type="number" placeholder="price"></label>
+      <label>Trade size (USDC) <input id="tradeUsdc" type="number" value="10" step="1"></label>
+      <label><input type="checkbox" id="autoTrade"> Auto-execute on signal (prompts Phantom)</label>
+      <label><input type="checkbox" id="notify" checked> Browser notifications</label>
+
       <div class="btn-row">
         <button id="startBot">Start Monitor</button>
         <button id="stopBot">Stop</button>
       </div>
       <div id="log"></div>
+    </section>
+
+    <section class="bot">
+      <h2>Withdraw SOL</h2>
+      <p>Simple SOL transfer from your connected wallet.</p>
+      <label>To address <input id="withdrawTo" placeholder="Solana address"></label>
+      <label>Amount (SOL) <input id="withdrawAmt" type="number" value="0.01" step="0.001"></label>
+      <div class="btn-row">
+        <button id="withdrawBtn">Withdraw SOL</button>
+      </div>
     </section>
   </div>
   <script src="script.js"></script>
