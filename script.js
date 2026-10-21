@@ -8,8 +8,11 @@ let botInterval, lastTradeAt = 0;
 let chart, lineSeries;
 let tokenBalanceRaw = 0n;
 let tokenDecimals = 0;
+let currentUsdc = 0;
 
 let copyInterval, seenSigs = new Set();
+
+const LS_DAY = 'solTraderDay';
 
 const connectPhantomBtn = document.getElementById('connectPhantom');
 const connectJupiterBtn = document.getElementById('connectJupiter');
@@ -30,6 +33,10 @@ const startCopyBtn = document.getElementById('startCopy');
 const stopCopyBtn = document.getElementById('stopCopy');
 const copyLogEl = document.getElementById('copyLog');
 const copyWalletsEl = document.getElementById('copyWallets');
+const dayStartEl = document.getElementById('dayStart');
+const daySpentEl = document.getElementById('daySpent');
+const dayLimitEl = document.getElementById('dayLimit');
+const resetDayBtn = document.getElementById('resetDay');
 
 if ('Notification' in window && Notification.permission !== 'granted') {
   Notification.requestPermission();
@@ -54,6 +61,69 @@ function getCopyWallets() {
     .split(/\n|,/)
     .map(s => s.trim())
     .filter(s => s.length > 30);
+}
+function getRiskPct() {
+  return Math.max(0.1, Math.min(5, parseFloat(document.getElementById('riskPct').value) || 0.5));
+}
+function getDailyLossPct() {
+  return Math.max(0.5, Math.min(10, parseFloat(document.getElementById('dailyLossPct').value) || 2));
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+function loadDay() {
+  try {
+    const raw = localStorage.getItem(LS_DAY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (d.date !== todayKey()) return null;
+    return d;
+  } catch { return null; }
+}
+function saveDay(d) {
+  localStorage.setItem(LS_DAY, JSON.stringify(d));
+}
+function ensureDay(usdc) {
+  let d = loadDay();
+  if (!d) {
+    d = { date: todayKey(), start: usdc, spent: 0 };
+    saveDay(d);
+  }
+  return d;
+}
+function updateDayUi(d) {
+  if (!d) {
+    dayStartEl.textContent = '-';
+    daySpentEl.textContent = '0';
+    dayLimitEl.textContent = '-';
+    return;
+  }
+  const limit = d.start * (getDailyLossPct() / 100);
+  dayStartEl.textContent = d.start.toFixed(2);
+  daySpentEl.textContent = d.spent.toFixed(2);
+  dayLimitEl.textContent = limit.toFixed(2);
+}
+function canBuy(usdc) {
+  const d = ensureDay(usdc);
+  const limit = d.start * (getDailyLossPct() / 100);
+  updateDayUi(d);
+  if (d.spent >= limit) {
+    log('Daily loss limit hit. Buys blocked.');
+    return false;
+  }
+  return true;
+}
+function recordSpend(amount) {
+  const d = ensureDay(currentUsdc);
+  d.spent += amount;
+  saveDay(d);
+  updateDayUi(d);
+}
+function tradeSizeUsdc() {
+  const pct = getRiskPct();
+  const size = currentUsdc * (pct / 100);
+  return Math.max(0, size);
 }
 
 function log(msg, el = logEl) {
@@ -114,7 +184,10 @@ async function refreshBalances() {
     if (usdcAcc.value.length) {
       usdc = usdcAcc.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0;
     }
+    currentUsdc = usdc;
     usdcBalEl.textContent = usdc.toFixed(2);
+    ensureDay(usdc);
+    updateDayUi(loadDay());
 
     const mint = tokenMintInput.value.trim();
     const tb = await getTokenBalance(mint);
@@ -181,6 +254,13 @@ refreshTokenBtn.onclick = async () => {
   log('Balances refreshed');
 };
 
+resetDayBtn.onclick = () => {
+  const d = { date: todayKey(), start: currentUsdc, spent: 0 };
+  saveDay(d);
+  updateDayUi(d);
+  log('Daily counters reset');
+};
+
 tokenMintInput.addEventListener('change', () => {
   if (publicKey) refreshBalances();
 });
@@ -236,11 +316,11 @@ async function updateChart(coinId) {
   } catch (e) {}
 }
 
-async function jupiterSwap(inputMint, outputMint, amountRaw) {
-  if (!provider || !publicKey) { log('Connect wallet first'); return; }
-  if (!amountRaw || amountRaw <= 0) { log('Amount is zero'); return; }
+async function jupiterSwap(inputMint, outputMint, amountRaw, spendUsdc = 0) {
+  if (!provider || !publicKey) { log('Connect wallet first'); return false; }
+  if (!amountRaw || amountRaw <= 0) { log('Amount is zero'); return false; }
   const jupKey = getJupKey();
-  if (!jupKey) { log('Enter Jupiter API key'); return; }
+  if (!jupKey) { log('Enter Jupiter API key'); return false; }
   ensureConnection();
   try {
     const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountRaw}&slippageBps=100`;
@@ -278,10 +358,13 @@ async function jupiterSwap(inputMint, outputMint, amountRaw) {
     log('Swap confirmed');
     notify('Swap confirmed', sig);
     lastTradeAt = Date.now();
+    if (spendUsdc > 0) recordSpend(spendUsdc);
     await refreshBalances();
+    return true;
   } catch (e) {
     log('Swap failed: ' + (e.message || 'error'));
     console.error(e);
+    return false;
   }
 }
 
@@ -289,12 +372,11 @@ startBtn.onclick = () => {
   const coin = document.getElementById('coinId').value.trim();
   const buy = parseFloat(document.getElementById('buyBelow').value);
   const sell = parseFloat(document.getElementById('sellAbove').value);
-  const usdcAmt = parseFloat(document.getElementById('tradeUsdc').value) || 10;
   const auto = document.getElementById('autoTrade').checked;
   const tokenMint = tokenMintInput.value.trim();
   if (!coin || !tokenMint) { log('Fill coin and mint'); return; }
   if (botInterval) clearInterval(botInterval);
-  log('Monitor started' + (auto ? ' (auto ON, 2 min cooldown)' : ''));
+  log('Monitor started' + (auto ? ' (auto ON, 0.5% risk)' : ''));
   updateChart(coin);
   refreshBalances();
   botInterval = setInterval(async () => {
@@ -305,15 +387,20 @@ startBtn.onclick = () => {
       const price = data[coin]?.usd;
       if (!price) { log('Coin not found'); return; }
       log(`${coin}: $${price}`);
-      const buyRaw = Math.floor(usdcAmt * 1e6);
       const cooled = Date.now() - lastTradeAt > 120000;
 
       if (buy && price < buy) {
         const msg = `BUY SIGNAL: ${coin} below ${buy}`;
         log(msg);
         notify('Buy Signal', msg);
-        if (auto && cooled) await jupiterSwap(USDC_MINT, tokenMint, buyRaw);
-        else if (auto && !cooled) log('Cooldown active, skip buy');
+        if (auto && cooled) {
+          if (!canBuy(currentUsdc)) return;
+          const usdcAmt = tradeSizeUsdc();
+          if (usdcAmt < 0.5) { log('Size too small'); return; }
+          const buyRaw = Math.floor(usdcAmt * 1e6);
+          log(`Risk size: ${usdcAmt.toFixed(2)} USDC`);
+          await jupiterSwap(USDC_MINT, tokenMint, buyRaw, usdcAmt);
+        } else if (auto && !cooled) log('Cooldown active, skip buy');
       }
       if (sell && price > sell) {
         const msg = `SELL SIGNAL: ${coin} above ${sell}`;
@@ -326,8 +413,8 @@ startBtn.onclick = () => {
           tokenBalEl.textContent = tb.ui.toFixed(Math.min(tb.decimals || 4, 6));
           if (tb.raw > 0n) {
             const sellRaw = tb.raw.toString();
-            log(`Selling ${tb.ui} token (raw ${sellRaw})`);
-            await jupiterSwap(tokenMint, USDC_MINT, sellRaw);
+            log(`Selling ${tb.ui} token`);
+            await jupiterSwap(tokenMint, USDC_MINT, sellRaw, 0);
           } else {
             log('No token balance to sell');
           }
@@ -343,7 +430,6 @@ stopBtn.onclick = () => {
   log('Stopped');
 };
 
-// --- Copy trade (multiple wallets) ---
 function parseTokenChanges(tx, owner) {
   const changes = [];
   const meta = tx?.meta;
@@ -372,7 +458,7 @@ function parseTokenChanges(tx, owner) {
   return changes;
 }
 
-async function pollOneWallet(addr, size, auto) {
+async function pollOneWallet(addr, auto) {
   try {
     const sigs = await connection.getSignaturesForAddress(new PublicKey(addr), { limit: 5 });
     for (const s of sigs.reverse()) {
@@ -391,14 +477,17 @@ async function pollOneWallet(addr, size, auto) {
         notify('Copy signal', msg);
         if (auto && publicKey && Date.now() - lastTradeAt > 60000) {
           if (c.buy) {
-            const raw = Math.floor(size * 1e6);
-            log(`[${short}] Mirroring buy with ${size} USDC`, copyLogEl);
-            await jupiterSwap(USDC_MINT, c.mint, raw);
+            if (!canBuy(currentUsdc)) continue;
+            const usdcAmt = tradeSizeUsdc();
+            if (usdcAmt < 0.5) { log(`[${short}] Size too small`, copyLogEl); continue; }
+            const raw = Math.floor(usdcAmt * 1e6);
+            log(`[${short}] Mirroring buy ${usdcAmt.toFixed(2)} USDC`, copyLogEl);
+            await jupiterSwap(USDC_MINT, c.mint, raw, usdcAmt);
           } else {
             const tb = await getTokenBalance(c.mint);
             if (tb.raw > 0n) {
-              log(`[${short}] Mirroring sell of your balance`, copyLogEl);
-              await jupiterSwap(c.mint, USDC_MINT, tb.raw.toString());
+              log(`[${short}] Mirroring sell`, copyLogEl);
+              await jupiterSwap(c.mint, USDC_MINT, tb.raw.toString(), 0);
             } else {
               log(`[${short}] No balance to sell`, copyLogEl);
             }
@@ -413,12 +502,11 @@ async function pollOneWallet(addr, size, auto) {
 
 async function pollCopy() {
   const wallets = getCopyWallets();
-  const size = parseFloat(document.getElementById('copySize').value) || 10;
   const auto = document.getElementById('copyAuto').checked;
   if (!wallets.length) return;
   ensureConnection();
   for (const addr of wallets) {
-    await pollOneWallet(addr, size, auto);
+    await pollOneWallet(addr, auto);
   }
 }
 
@@ -474,3 +562,4 @@ withdrawBtn.onclick = async () => {
 };
 
 updateChart('solana');
+updateDayUi(loadDay());

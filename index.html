@@ -32,7 +32,18 @@
         <button id="copyAddr" class="secondary" type="button">Copy</button>
       </div>
       <p>SOL: <span id="solBal">0</span> &nbsp;|&nbsp; USDC: <span id="usdcBal">0</span> &nbsp;|&nbsp; Token: <span id="tokenBal">0</span></p>
-      <p class="hint">Fund by sending USDC to your address above. Keep a little SOL for fees. Token balance is for the mint above.</p>
+      <p class="hint">Fund by sending USDC to your address above. Keep a little SOL for fees.</p>
+    </section>
+
+    <section class="bot" id="riskBox">
+      <h2>Risk</h2>
+      <p>Max 0.5% of USDC per trade. Daily loss stops new buys. Pump.fun style: small size only.</p>
+      <label>Risk per trade (%) <input id="riskPct" type="number" value="0.5" step="0.1" min="0.1" max="5"></label>
+      <label>Daily loss limit (%) <input id="dailyLossPct" type="number" value="2" step="0.5" min="0.5" max="10"></label>
+      <p>Today: start <span id="dayStart">-</span> USDC &nbsp;|&nbsp; spent <span id="daySpent">0</span> &nbsp;|&nbsp; limit <span id="dayLimit">-</span></p>
+      <div class="btn-row">
+        <button id="resetDay" class="secondary" type="button">Reset daily</button>
+      </div>
     </section>
 
     <section class="chart-section">
@@ -47,7 +58,7 @@
 
     <section class="bot">
       <h2>Live Auto-Trade</h2>
-      <p>Signals trigger Jupiter swaps (USDC ↔ token). Sells use your real token balance. Every trade prompts your wallet. Live only. Auto waits 2 min between trades.</p>
+      <p>Signals trigger Jupiter swaps. Size is capped at risk %. Sells use your token balance. Prompts wallet. Live only.</p>
 
       <label>Jupiter API key <input id="jupKey" type="password" placeholder="jup_..." autocomplete="off"></label>
       <label>Helius API key <input id="heliusKey" type="password" placeholder="helius key" autocomplete="off"></label>
@@ -61,7 +72,6 @@
       <label>Coin ID for price (CoinGecko) <input id="coinId" value="solana"></label>
       <label>Buy below ($) <input id="buyBelow" type="number" placeholder="price"></label>
       <label>Sell above ($) <input id="sellAbove" type="number" placeholder="price"></label>
-      <label>Trade size (USDC) <input id="tradeUsdc" type="number" value="10" step="1"></label>
       <label><input type="checkbox" id="autoTrade"> Auto-execute on signal (prompts wallet)</label>
       <label><input type="checkbox" id="notify" checked> Browser notifications</label>
 
@@ -74,13 +84,12 @@
 
     <section class="bot">
       <h2>Copy Trade</h2>
-      <p>Watch one or more wallets (one per line). When any buys or sells a token, mirror with your USDC size (prompts your wallet). Live only.</p>
+      <p>Watch wallets (one per line). Mirror buys/sells at risk size. Daily loss blocks new buys.</p>
       <label>Wallets to copy
         <textarea id="copyWallets" rows="4">DVFYHVKFYLxws4bV97va6EceVRrKjddHSWYq3is4ad49
 FG4c1qnq8vEc9nn6uxmtWVjWZLE9rxTfeExBYh5GQnRb
 EwJYY4q2rcrdEH26doRbYX9JxbpYPSNZvRLgzhPKi418</textarea>
       </label>
-      <label>Copy size (USDC) <input id="copySize" type="number" value="10" step="1"></label>
       <label><input type="checkbox" id="copyAuto"> Auto-mirror new trades</label>
       <div class="btn-row">
         <button id="startCopy">Start Copy</button>
