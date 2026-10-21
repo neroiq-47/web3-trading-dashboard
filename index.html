@@ -74,9 +74,11 @@
 
     <section class="bot">
       <h2>Copy Trade</h2>
-      <p>Watch a wallet. When it buys or sells a token, mirror with your USDC size (prompts your wallet). Live only.</p>
-      <label>Wallet to copy
-        <input id="copyWallet" value="DVFYHVKFYLxws4bV97va6EceVRrKjddHSWYq3is4ad49">
+      <p>Watch one or more wallets (one per line). When any buys or sells a token, mirror with your USDC size (prompts your wallet). Live only.</p>
+      <label>Wallets to copy
+        <textarea id="copyWallets" rows="4">DVFYHVKFYLxws4bV97va6EceVRrKjddHSWYq3is4ad49
+FG4c1qnq8vEc9nn6uxmtWVjWZLE9rxTfeExBYh5GQnRb
+EwJYY4q2rcrdEH26doRbYX9JxbpYPSNZvRLgzhPKi418</textarea>
       </label>
       <label>Copy size (USDC) <input id="copySize" type="number" value="10" step="1"></label>
       <label><input type="checkbox" id="copyAuto"> Auto-mirror new trades</label>

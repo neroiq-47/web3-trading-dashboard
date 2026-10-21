@@ -2,8 +2,6 @@ const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = 
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
-const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 let provider, publicKey, connection, walletLabel = '', fullAddress = '';
 let botInterval, lastTradeAt = 0;
@@ -31,6 +29,7 @@ const tokenMintInput = document.getElementById('tokenMint');
 const startCopyBtn = document.getElementById('startCopy');
 const stopCopyBtn = document.getElementById('stopCopy');
 const copyLogEl = document.getElementById('copyLog');
+const copyWalletsEl = document.getElementById('copyWallets');
 
 if ('Notification' in window && Notification.permission !== 'granted') {
   Notification.requestPermission();
@@ -49,6 +48,12 @@ function getRpc() {
 function ensureConnection() {
   connection = new Connection(getRpc(), 'confirmed');
   return connection;
+}
+function getCopyWallets() {
+  return (copyWalletsEl.value || '')
+    .split(/\n|,/)
+    .map(s => s.trim())
+    .filter(s => s.length > 30);
 }
 
 function log(msg, el = logEl) {
@@ -338,7 +343,7 @@ stopBtn.onclick = () => {
   log('Stopped');
 };
 
-// --- Copy trade ---
+// --- Copy trade (multiple wallets) ---
 function parseTokenChanges(tx, owner) {
   const changes = [];
   const meta = tx?.meta;
@@ -367,12 +372,7 @@ function parseTokenChanges(tx, owner) {
   return changes;
 }
 
-async function pollCopy() {
-  const addr = document.getElementById('copyWallet').value.trim();
-  const size = parseFloat(document.getElementById('copySize').value) || 10;
-  const auto = document.getElementById('copyAuto').checked;
-  if (!addr) return;
-  ensureConnection();
+async function pollOneWallet(addr, size, auto) {
   try {
     const sigs = await connection.getSignaturesForAddress(new PublicKey(addr), { limit: 5 });
     for (const s of sigs.reverse()) {
@@ -385,43 +385,57 @@ async function pollCopy() {
       for (const c of changes) {
         const side = c.buy ? 'BUY' : 'SELL';
         const ui = Number(c.delta < 0n ? -c.delta : c.delta) / Math.pow(10, c.decimals);
-        const msg = `${side} ${ui.toFixed(4)} of ${c.mint.slice(0, 6)}...`;
+        const short = addr.slice(0, 4);
+        const msg = `[${short}] ${side} ${ui.toFixed(4)} of ${c.mint.slice(0, 6)}...`;
         log(msg, copyLogEl);
         notify('Copy signal', msg);
         if (auto && publicKey && Date.now() - lastTradeAt > 60000) {
           if (c.buy) {
             const raw = Math.floor(size * 1e6);
-            log('Mirroring buy with ' + size + ' USDC', copyLogEl);
+            log(`[${short}] Mirroring buy with ${size} USDC`, copyLogEl);
             await jupiterSwap(USDC_MINT, c.mint, raw);
           } else {
             const tb = await getTokenBalance(c.mint);
             if (tb.raw > 0n) {
-              log('Mirroring sell of your balance', copyLogEl);
+              log(`[${short}] Mirroring sell of your balance`, copyLogEl);
               await jupiterSwap(c.mint, USDC_MINT, tb.raw.toString());
             } else {
-              log('No balance to sell', copyLogEl);
+              log(`[${short}] No balance to sell`, copyLogEl);
             }
           }
         }
       }
     }
   } catch (e) {
-    log('Copy poll error: ' + (e.message || ''), copyLogEl);
+    log('Copy error (' + addr.slice(0, 4) + '): ' + (e.message || ''), copyLogEl);
+  }
+}
+
+async function pollCopy() {
+  const wallets = getCopyWallets();
+  const size = parseFloat(document.getElementById('copySize').value) || 10;
+  const auto = document.getElementById('copyAuto').checked;
+  if (!wallets.length) return;
+  ensureConnection();
+  for (const addr of wallets) {
+    await pollOneWallet(addr, size, auto);
   }
 }
 
 startCopyBtn.onclick = async () => {
-  const addr = document.getElementById('copyWallet').value.trim();
-  if (!addr) { log('Enter wallet', copyLogEl); return; }
+  const wallets = getCopyWallets();
+  if (!wallets.length) { log('Add at least one wallet', copyLogEl); return; }
   if (copyInterval) clearInterval(copyInterval);
   seenSigs = new Set();
   ensureConnection();
-  try {
-    const recent = await connection.getSignaturesForAddress(new PublicKey(addr), { limit: 10 });
-    recent.forEach(s => seenSigs.add(s.signature));
-  } catch {}
-  log('Copy started for ' + addr.slice(0, 6) + '...', copyLogEl);
-  copyInterval = setInterval(pollCopy, 15000);
+  for (const addr of wallets) {
+    try {
+      const recent = await connection.getSignaturesForAddress(new PublicKey(addr), { limit: 10 });
+      recent.forEach(s => seenSigs.add(s.signature));
+    } catch {}
+  }
+  log('Copy started for ' + wallets.length + ' wallet(s)', copyLogEl);
+  copyInterval = setInterval(pollCopy, 20000);
 };
 
 stopCopyBtn.onclick = () => {

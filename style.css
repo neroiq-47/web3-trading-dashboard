@@ -125,18 +125,20 @@ label {
   font-size: 0.9rem;
   color: #ccc;
 }
-input[type="number"], input[type="text"], input[type="password"] {
+input[type="number"], input[type="text"], input[type="password"], textarea {
   background: #1a1a1a;
   color: white;
   border: 1px solid var(--purple);
   padding: 0.5rem 0.65rem;
   width: 100%;
-  max-width: 280px;
+  max-width: 480px;
   border-radius: 5px;
   margin-top: 0.25rem;
   font-size: 0.95rem;
+  font-family: inherit;
 }
-input:focus {
+textarea { resize: vertical; min-height: 90px; }
+input:focus, textarea:focus {
   outline: none;
   border-color: var(--gold);
   box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.15);
@@ -147,7 +149,7 @@ input:focus {
   flex-wrap: wrap;
   margin-top: 0.75rem;
 }
-#log {
+#log, #copyLog {
   margin-top: 1rem;
   font-size: 0.85rem;
   max-height: 200px;
@@ -167,7 +169,7 @@ input:focus {
   h1 { font-size: 1.4rem; }
   .logo { width: 32px; height: 32px; }
   .coins { grid-template-columns: 1fr 1fr; }
-  input[type="number"], input[type="text"], input[type="password"] { max-width: 100%; }
+  input[type="number"], input[type="text"], input[type="password"], textarea { max-width: 100%; }
   button { width: 100%; }
   .btn-row button { flex: 1; }
 }
