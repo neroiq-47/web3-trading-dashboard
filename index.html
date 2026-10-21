@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web3 Trading Bot</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js" type="application/javascript"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Web3 Trader</h1>
+      <button id="connectBtn">Connect Wallet</button>
+    </header>
+    <section id="walletInfo" class="hidden">
+      <p>Address: <span id="address"></span></p>
+      <p>Balance: <span id="balance">0</span> ETH</p>
+    </section>
+    <section class="market">
+      <h2>Live Market</h2>
+      <div id="coins" class="coins"></div>
+    </section>
+    <section class="bot">
+      <h2>Simple Bot</h2>
+      <p>Monitor prices. Fund your wallet and confirm trades live in MetaMask.</p>
+      <label>Coin ID (e.g. bitcoin): <input id="coinId" value="bitcoin"></label>
+      <label>Buy below: <input id="buyBelow" type="number" placeholder="price"></label>
+      <label>Sell above: <input id="sellAbove" type="number" placeholder="price"></label>
+      <button id="startBot">Start Monitor</button>
+      <button id="stopBot">Stop</button>
+      <div id="log"></div>
+    </section>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>

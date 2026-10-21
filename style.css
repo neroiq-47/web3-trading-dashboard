@@ -1,0 +1,59 @@
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0a0a0a;
+  color: #e0e0e0;
+}
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #6a0dad;
+  padding-bottom: 1rem;
+}
+h1 {
+  color: #ffd700;
+  margin: 0;
+}
+button {
+  background: #6a0dad;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+button:hover {
+  background: #8a2be2;
+}
+.hidden { display: none; }
+.coins {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.coin-card {
+  background: #1a1a1a;
+  border: 1px solid #6a0dad;
+  padding: 1rem;
+  border-radius: 8px;
+}
+.coin-card h3 { color: #ffd700; margin: 0 0 0.5rem; }
+.bot {
+  margin-top: 2rem;
+  padding: 1rem;
+  background: #111;
+  border: 1px solid #ffd700;
+  border-radius: 8px;
+}
+label { display: block; margin: 0.5rem 0; }
+input { background: #222; color: white; border: 1px solid #6a0dad; padding: 0.4rem; width: 100%; max-width: 200px; }
+#log { margin-top: 1rem; font-size: 0.9rem; max-height: 200px; overflow: auto; }
+.log-entry { padding: 0.3rem 0; border-bottom: 1px solid #333; }
